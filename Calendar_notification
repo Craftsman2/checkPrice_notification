@@ -1,0 +1,88 @@
+function checkPrice() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const data = sheet.getDataRange().getValues();
+  
+  const now = new Date();
+  
+  // Начинаем со второй строки (индекс 1), так как первая — заголовки
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const assetName = row[0];       // Столбец A: Название бумаги
+    const currentPrice = row[2];    // Столбец C: Цена текущая
+    const targetPrice = row[3];     // Столбец D: Цена триггер
+    const condition = row[4];       // Столбец E: Условие
+    const extraText = row[5] || ""; // Столбец F: Доп. текст
+    const pauseUntil = row[8];      // Столбец I: Пауза до
+    
+    // Проверка паузы: если время в столбце I задано
+    if (pauseUntil instanceof Date) {
+      if (now >= pauseUntil) {
+        // Если время вышло, очищаем ячейку в столбце I
+        sheet.getRange(i + 1, 9).clearContent();
+      } else {
+        // Если время еще не пришло, пропускаем эту строку
+        continue;
+      }
+    }
+    
+    // Пропускаем строку, если не заполнены цена или условие
+    if (!currentPrice || !condition || !targetPrice) continue;
+    
+    let isTriggered = false;
+    
+    // Логика проверки условий
+    switch (condition) {
+      case "Равно":
+        if (currentPrice === targetPrice) isTriggered = true;
+        break;
+      case "Больше или равно":
+        if (currentPrice >= targetPrice) isTriggered = true;
+        break;
+      case "Меньше или равно":
+        if (currentPrice <= targetPrice) isTriggered = true;
+        break;
+    }
+    
+    if (isTriggered) {
+      // Формируем данные для календаря
+      const eventTitle = `СИГНАЛ: ${assetName} достиг ${currentPrice}`;
+      const eventDescription = `Мое Условие: ${condition} ${targetPrice}\nДополнительно: ${extraText}`;
+      
+      try {
+        // Создаем событие в календаре (на текущее время, длительностью 15 минут)
+        const startTime = new Date(now);
+        const endTime = new Date(now.getTime() + 15 * 60 * 1000); 
+        
+        CalendarApp.getDefaultCalendar().createEvent(
+          eventTitle,
+          startTime,
+          endTime,
+          {description: eventDescription}
+        );
+
+        // Устанавливаем паузу на 1 час (чтобы не создавать дубликаты событий при каждом запуске)
+        const pauseTime = new Date(now);
+        pauseTime.setHours(pauseTime.getHours() + 1);
+        
+        // Записываем время окончания паузы в столбец I
+        sheet.getRange(i + 1, 9).setValue(pauseTime);
+        
+      } catch (e) {
+        Logger.log("Ошибка при создании события в календаре: " + e.toString());
+      }
+    }
+  }
+}
+
+/**
+ * Создает триггер для автоматического запуска
+ */
+function createTrigger() {
+  const triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(t => ScriptApp.deleteTrigger(t));
+  
+  ScriptApp.newTrigger('checkPrice')
+      .timeBased()
+      .everyMinutes(5)
+      .create();
+}
