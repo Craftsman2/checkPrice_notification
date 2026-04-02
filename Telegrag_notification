@@ -1,0 +1,107 @@
+/**
+ * Функция для проверки цен и отправки уведомлений в Telegram.
+ * Настройте переменные token и chatId перед использованием.
+ * Ссылка на gemini https://gemini.google.com/app/21c65869a4675b34 
+ */
+function checkPrice() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const data = sheet.getDataRange().getValues(); // Получаем все данные из таблицы
+  
+  // Настройки Telegram
+  const token = "7672037405:AAEZDDSrvGlyHPvA1YiL9JfDlU6QBhAVfNU";
+  const chatId = "234156819";
+  
+  const now = new Date();
+  
+  // Начинаем со второй строки (индекс 1), так как первая — заголовки
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    
+    const assetName = row[0];       // Столбец A: Название бумаги
+    const currentPrice = row[2];    // Столбец C: Цена текущая
+    const targetPrice = row[3];     // Столбец D: Цена триггер 
+    const condition = row[4];       // Столбец E: Условие 
+    const extraText = row[5] || ""; // Столбец F: Доп. текст
+    const pauseUntil = row[8];      // Столбец I: Пауза до
+    
+    // Проверка паузы: если время в столбце I задано
+    if (pauseUntil instanceof Date) {
+      if (now >= pauseUntil) {
+        // Если время вышло, очищаем ячейку в столбце I (9-й столбец)
+        sheet.getRange(i + 1, 9).clearContent();
+      } else {
+        // Если время еще не пришло, пропускаем эту строку
+        continue;
+      }
+    }
+    
+    // Пропускаем строку, если не заполнены цена или условие
+    if (!currentPrice || !condition || !targetPrice) continue;
+    
+    let isTriggered = false;
+    let conditionSign = condition; // Используем текст условия напрямую из столбца E
+    
+    // Логика проверки условий
+    switch (condition) {
+      case "Равно":
+        if (currentPrice === targetPrice) isTriggered = true;
+        break;
+      case "Больше или равно":
+        if (currentPrice >= targetPrice) isTriggered = true;
+        break;
+      case "Меньше или равно":
+        if (currentPrice <= targetPrice) isTriggered = true;
+        break;
+    }
+    
+    if (isTriggered) {
+      // Формируем текст сообщения. Название и Цена выделены жирным.
+      // Используется текст условия (например, "Меньше или равно")
+      const message = `<b>${assetName}</b>: <b>${currentPrice}</b> (Мое условие: ${conditionSign} ${targetPrice}). ${extraText}`;
+      
+      try {
+        // Отправка в Telegram
+        sendTelegramMessage(token, chatId, message);
+        
+        // Устанавливаем паузу на 1 час через setHours
+        const pauseTime = new Date(now);
+        pauseTime.setHours(pauseTime.getHours() + 1);
+        
+        // Записываем в столбец I (индекс 9) текущей строки
+        sheet.getRange(i + 1, 9).setValue(pauseTime);
+        
+      } catch (e) {
+        Logger.log("Ошибка при отправке или записи: " + e.toString());
+      }
+    }
+  }
+}
+
+/**
+ * Вспомогательная функция для выполнения HTTP-запроса к Telegram API
+ */
+function sendTelegramMessage(token, chatId, text) {
+  const url = `https://api.telegram.org/bot${token}/sendMessage`;
+  const payload = {
+    method: "post",
+    payload: {
+      chat_id: chatId,
+      text: text,
+      parse_mode: "HTML"
+    }
+  };
+  UrlFetchApp.fetch(url, payload);
+}
+
+/**
+ * Создает триггер для запуска проверки каждые 5 минут
+ */
+function createTrigger() {
+  const triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(t => ScriptApp.deleteTrigger(t));
+  
+  ScriptApp.newTrigger('checkPrice')
+      .timeBased()
+      .everyMinutes(5)
+      .create();
+}
