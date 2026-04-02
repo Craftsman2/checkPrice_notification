@@ -1,0 +1,85 @@
+function checkPrice() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const data = sheet.getDataRange().getValues();
+  
+  // Получаем ваш email адрес
+  const userEmail = Session.getActiveUser().getEmail();
+  const now = new Date();
+  
+  // Начинаем со второй строки (индекс 1), так как первая — заголовки
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const assetName = row[0];       // Столбец A: Название бумаги
+    const currentPrice = row[2];    // Столбец C: Цена текущая
+    const targetPrice = row[3];     // Столбец D: Цена триггер
+    const condition = row[4];       // Столбец E: Условие
+    const extraText = row[5] || ""; // Столбец F: Доп. текст
+    const pauseUntil = row[8];      // Столбец I: Пауза до
+    
+    // Проверка паузы: если время в столбце I задано
+    if (pauseUntil instanceof Date) {
+      if (now >= pauseUntil) {
+        // Если время вышло, очищаем ячейку в столбце I
+        sheet.getRange(i + 1, 9).clearContent();
+      } else {
+        // Если время еще не пришло, пропускаем эту строку
+        continue;
+      }
+    }
+    
+    // Пропускаем строку, если не заполнены цена или условие
+    if (!currentPrice || !condition || !targetPrice) continue;
+    
+    let isTriggered = false;
+    
+    // Логика проверки условий
+    switch (condition) {
+      case "Равно":
+        if (currentPrice === targetPrice) isTriggered = true;
+        break;
+      case "Больше или равно":
+        if (currentPrice >= targetPrice) isTriggered = true;
+        break;
+      case "Меньше или равно":
+        if (currentPrice <= targetPrice) isTriggered = true;
+        break;
+    }
+    
+    if (isTriggered) {
+      // Формируем тему и текст письма
+      const subject = `СИГНАЛ: ${assetName} — ${currentPrice}`;
+      const body = `Актив: ${assetName}\n` +
+                   `Текущая цена: ${currentPrice}\n` +
+                   `Цель: ${targetPrice} (${condition})\n` +
+                   `Заметка: ${extraText}`;
+      
+      try {
+        // Отправка через Gmail
+        GmailApp.sendEmail(userEmail, subject, body);
+
+        // Устанавливаем паузу на 1 час (чтобы не получать письма каждые 5 минут)
+        const pauseTime = new Date(now);
+        pauseTime.setHours(pauseTime.getHours() + 1);
+        
+        // Записываем время окончания паузы в столбец I
+        sheet.getRange(i + 1, 9).setValue(pauseTime);
+        
+      } catch (e) {
+        Logger.log("Ошибка при отправке почты: " + e.toString());
+      }
+    }
+  }
+}
+
+/**
+ * Создает триггер для автоматического запуска (раз в 5 минут)
+ */
+function createTrigger() {
+  const triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(t => ScriptApp.deleteTrigger(t));
+  
+  ScriptApp.newTrigger('checkPrice')
+      .timeBased()
+      .everyMinutes(5)
+      .create();
+}
